@@ -6,41 +6,18 @@ from typing import List
 import cv2
 import numpy as np
 import matplotlib.pylab as plt
+import pytesseract
 
 import functions as f
 
-OUT = '/home/edgar/OCR/out/'
-
-
-def find_lines_trial(gray):
-    path = '/home/edgar/OCR/Scuole_Primarie_1863_page12.png'
-    out = OUT
-    img = cv2.imread(path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-    # cv2.imwrite(out + 'edges.jpg', edges)
-
-    find_edges(gray)
-
-    min_length = min(gray.shape[0], gray.shape[1])
-    minLineLength = min_length / 4
-    maxLineGap = 50
-
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 200, minLineLength=minLineLength, maxLineGap=maxLineGap)
-    print("Found {} lines".format(len(lines)))
-
-    edges = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
-    for ii in range(len(lines)):
-        x1, y1, x2, y2 = lines[ii][0]
-        cv2.line(img, (x1, y1), (x2, y2), (0, 0, 255), 3)
-        cv2.line(edges, (x1, y1), (x2, y2), (0, 0, 255), 3)
-
-    cv2.imwrite(out + 'edges+houghlines5.jpg', edges)
-    cv2.imwrite(out + 'img+houghlines5.jpg', img)
-
 
 def running_mean(x, n=3):
-    return np.convolve(x, np.ones((n,))/n, mode='valid')
+    return np.convolve(x, np.ones((n,)) / n, mode='valid')
+
+
+def moving_average(interval, window_size):
+    window = np.ones(int(window_size)) / float(window_size)
+    return np.convolve(interval, window, 'same')
 
 
 def find_local_minima_and_maximas_indexs(data):
@@ -50,12 +27,13 @@ def find_local_minima_and_maximas_indexs(data):
     return minima, maxima
 
 
-def moving_average(interval, window_size):
-    window = np.ones(int(window_size))/float(window_size)
-    return np.convolve(interval, window, 'same')
-
-
 def get_average_value(gray, axis, step=5, width=None):
+    """ Average pixel values either along the x or y direction to get an average blackness.
+    gray:  image, numpy array
+    axis: either 'x'/1 or 'y'/0
+    step: how many pixels to move on after averaging a line
+    width: how many lines of pixels to average together. Set equal to the step by default.
+    """
     if axis == 'y':
         ax = 0
     elif axis == 'x':
@@ -69,9 +47,9 @@ def get_average_value(gray, axis, step=5, width=None):
     if width is None:
         width = step
     pos, value = [], []
-    while top_index < gray.shape[ax]-width:
+    while top_index < gray.shape[ax] - width:
         if ax == 0:
-            hl = gray[top_index:top_index+width, :]
+            hl = gray[top_index:top_index + width, :]
         if ax == 1:
             hl = gray[:, top_index:top_index + width]
 
@@ -80,13 +58,11 @@ def get_average_value(gray, axis, step=5, width=None):
         value.append(mean)
         top_index += step
 
-    # plt.figure()
-    # plt.plot(pos, value, 'o-')
-
     return pos, value
 
 
 def find_horizontal_lines(gray):
+    """ Find main outer horizontal lines """
     pos, value = get_average_value(gray[:750, :], axis='y', step=5)
     top_line_y_pos = pos[value.index(min(value))]
 
@@ -102,6 +78,7 @@ def find_horizontal_lines(gray):
 
 
 def find_vertical_lines(gray):
+    """ Find main outer vertical lines """
     pos, value = get_average_value(gray[:, 0:750], axis='x', step=5)
     left_x_pos = pos[value.index(min(value))]
 
@@ -112,17 +89,12 @@ def find_vertical_lines(gray):
     return left_x_pos, right_x_pos
 
 
-def find_lines(gray, plot=False):
+def find_outer_boxing_lines_of_table(gray, save_path=None):
     top_line_y_pos, top_2nd_line_y_pos, bottom_line_y_pos = find_horizontal_lines(gray)
 
-    print(top_line_y_pos)
-    print(top_2nd_line_y_pos)
-    print(bottom_line_y_pos)
-
     left_x_pos, right_x_pos = find_vertical_lines(gray)
-    print(left_x_pos, right_x_pos)
 
-    if plot:
+    if save_path:
         gray = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
         x1, y1, x2, y2 = 0, top_line_y_pos, gray.shape[1], top_line_y_pos
         cv2.line(gray, (x1, y1), (x2, y2), (0, 0, 255), 3)
@@ -136,13 +108,14 @@ def find_lines(gray, plot=False):
         x1, y1, x2, y2 = right_x_pos, gray.shape[0], right_x_pos, 0
         cv2.line(gray, (x1, y1), (x2, y2), (0, 0, 255), 3)
 
-        cv2.imwrite(OUT + 'horizontl_lines.jpg', gray)
+        cv2.imwrite(save_path, gray)
 
     return (top_line_y_pos, top_2nd_line_y_pos, bottom_line_y_pos), (left_x_pos, right_x_pos)
 
 
 def trim_to_table(gray):
-    ys, xs = find_lines(gray)
+    """ Trim image to the part that is the table. """
+    ys, xs = find_outer_boxing_lines_of_table(gray)
     table = gray[ys[1]:ys[2], xs[0]:xs[1]]
 
     threshold = 150
@@ -153,13 +126,6 @@ def trim_to_table(gray):
     minima, _ = find_local_minima_and_maximas_indexs(value)
     sel_minima = np.array([x for x in minima if value[x] < threshold])
     vertical_lines = pos[sel_minima]
-
-    # plt.figure(figsize=(6,4))
-    # plt.plot(pos, value, 'o-r ', ms=2, lw=1, label='x')
-    # plt.plot(pos[sel_minima], value[sel_minima], 'dy', ms=3, lw=None, label='x')
-    # plt.title('x')
-    # plt.savefig(OUT + 'x_table_lines.png', dpi=300)
-    # plt.figure(figsize=(6,4))
 
     pos, value = get_average_value(table.copy(), axis='y', step=2, width=5)
 
@@ -181,31 +147,32 @@ def trim_to_table(gray):
     # plt.title('y')
     # # plt.savefig(OUT + 'y_table_lines.png', dpi=300)
     # plt.show()
-
-    # table = cv2.cvtColor(table, cv2.COLOR_GRAY2RGB)
-    # for vl in vertical_lines:
-    #     x1, y1, x2, y2 = vl, 0, vl, table.shape[0]
-    #     cv2.line(table, (x1, y1), (x2, y2), (0, 0, 255), 3)
-    #
-    # for hl in horizontal_lines:
-    #     x1, y1, x2, y2 = 0, hl, table.shape[1], hl
-    #     cv2.line(table, (x1, y1), (x2, y2), (0, 0, 255), 3)
-    #
-    # for hl in txt_lines:
-    #     x1, y1, x2, y2 = 0, hl, table.shape[1], hl
-    #     cv2.line(table, (x1, y1), (x2, y2), (255, 0, 0), 3)
-    #
-    # cv2.imwrite(OUT + 'table_lines.jpg', table)
     return vertical_lines, horizontal_lines, txt_lines, table
 
 
-def find_edges(gray):
+def plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, save_path):
+    table = cv2.cvtColor(table, cv2.COLOR_GRAY2RGB)
+    for vl in vertical_lines:
+        x1, y1, x2, y2 = vl, 0, vl, table.shape[0]
+        cv2.line(table, (x1, y1), (x2, y2), (0, 0, 255), 3)
 
+    for hl in horizontal_lines:
+        x1, y1, x2, y2 = 0, hl, table.shape[1], hl
+        cv2.line(table, (x1, y1), (x2, y2), (0, 0, 255), 3)
+
+    for hl in txt_lines:
+        x1, y1, x2, y2 = 0, hl, table.shape[1], hl
+        cv2.line(table, (x1, y1), (x2, y2), (255, 0, 0), 3)
+
+    cv2.imwrite(save_path, table)
+
+
+def find_edges(gray):
     top_index = 0
     step = 2
     pos, value = [], []
-    while top_index < gray.shape[0]-step:
-        hl = gray[top_index:top_index+step, :]
+    while top_index < gray.shape[0] - step:
+        hl = gray[top_index:top_index + step, :]
         mean = np.average(hl[:, :])
         print("{} -> {}".format(top_index, mean))
         pos.append(top_index)
@@ -271,6 +238,7 @@ def segment_into_sub_lines(im, segment):
 
 
 def add_border(im, border=40):
+    """ Add border around image """
     value = (255, 255, 255)
     top, bottom, left, right = border, border, border, border
     borderType = cv2.BORDER_CONSTANT
@@ -282,10 +250,9 @@ def split_line_into_rows(line_im, vertical_lines):
     texts = []
 
     for ii in range(1, len(vertical_lines)):
-        xs, xe = vertical_lines[ii-1], vertical_lines[ii]
-        if xe-xs > 10:
-            part = line_im[:, xs+5:xe-5]
-            cv2.imwrite(OUT + 'line_segmented_{}-{}.png'.format(xs, xe), part)
+        xs, xe = vertical_lines[ii - 1], vertical_lines[ii]
+        if xe - xs > 10:
+            part = line_im[:, xs + 5:xe - 5]
             text = f.get_ocr_as_text_output(part, info=True)
             if ii > 1:
                 match = re.search(r'[a-zA-Z]{4,25}|\d{1,5}|>>|"', text.replace(',', ''))
@@ -296,74 +263,120 @@ def split_line_into_rows(line_im, vertical_lines):
 
 
 def segment_image(gray):
+    """ Find table and split it into individual lines. """
     vertical_lines, horizontal_lines, txt_lines, table = trim_to_table(gray)
 
-    line_spacing = txt_lines[1] - txt_lines[0]
-    top = int(txt_lines[0] - line_spacing/2)
-    bottom = int(txt_lines[0] + line_spacing / 2)
+    # TODO: deal with cases where there are headings in the table
 
-    line_im = table[top:bottom, :]
-    cv2.imwrite(OUT + 'line_ex.png', line_im)
+    half_median_height = int(np.median(np.diff(txt_lines))/2)
+    text = []
+    start_time = time.time()
+    for ii, line_y in enumerate(txt_lines):
+        if ii > 0:
+            print("{} / {} after {} seconds ({} for the last line)".format(ii+1, len(txt_lines), time.time() - start_time, time.time() - last_time))
+        last_time = time.time()
+        line_text = []
+        top, bottom = line_y - half_median_height, line_y + half_median_height
+        line_im = table[top:bottom, :]
+        main, minor = find_all_vertical_lines(line_im)
+        if len(main) == 5:
+            #Take each row in turn
+            previous_x = 0
+            parition_lines = list(main) + list(minor) + [line_im.shape[1]]
+            for ml in sorted(parition_lines):
+                if (ml - previous_x) > 40:
+                    xs, xe = previous_x + 10, ml - 4
+                    part_im = line_im[:, xs:xe].copy()
+                    string = pytesseract.image_to_string(part_im, lang='ita', config='--psm 7')
+                    match = re.search(r'[a-zA-Z]{4,25}|\d{1,5}|>>|"', string.replace(',', ''))
+                    if match:
+                        line_text.append(match.group())
+                    previous_x = ml
+        text.append(line_text)
+    return text
 
-    print(vertical_lines)
-    # line_txt = split_line_into_rows(line_im, vertical_lines)
-    # print(line_txt)
-    # cv2.imshow('line', line_im)
-    # cv2.waitKey(2)
+
+def combine_points_with_smallest_distance(points: List, merge_threshold):
+    points = list(points)
+    new_points = []
+    if len(points) > 1:
+        diff = np.diff(points)
+        index = np.argmin(diff)
+        if diff[index] < merge_threshold:
+            if index > 0:
+                new_points += points[:index]
+            new_points += [(points[index] + points[index + 1]) / 2.0]
+            if index < len(points) - 1:
+                new_points += points[index + 2:]
+        else:
+            new_points = points
+    else:
+        new_points = points
+    return new_points
 
 
-def find_vertical_lines_by_looking_at_edge(line_im):
-    bottom = line_im.shape[0]
-    width = 8  # pixels
-    threshold = 210
-    pos, value = get_average_value(line_im[:width, :].copy(), axis='x', step=2, width=2)
+def combine_lines_within_threshold(lines: List[int], merge_threshold: int = 10):
+    """ Combine any lines that are within the threshold and replace them by their average, works recursively, starting
+    with the lines closest together.
+    """
+    new_lines = lines
+    if len(lines) > 0:
+        merging = True
+        while merging:
+            nl = combine_points_with_smallest_distance(new_lines, merge_threshold)
+            if len(nl) < len(new_lines):
+                new_lines = nl
+                merging = True
+            else:
+                merging = False
+
+    return [int(round(x)) for x in new_lines]
+
+
+def find_vertical_lines_by_looking_at_edge(line_im, threshold=210, edge=8, width=2, step=2):
+    """ Look at top edge to find vertical lines in image. """
+    pos, value = get_average_value(line_im[:edge, :].copy(), axis='x', step=step, width=width)
 
     pos, value = np.array(pos), np.array(value)
     minima, _ = find_local_minima_and_maximas_indexs(value)
     sel_minima = np.array([x for x in minima if value[x] < threshold])
-    vertical_lines = pos[sel_minima]
+    vertical_lines = []
+    if len(sel_minima) > 0:
+        vertical_lines = pos[sel_minima]
 
     return vertical_lines
 
 
-def helper_function_segment_line():
-    f = OUT + 'line_ex.png'
-    line_im = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-    vertical_lines = find_vertical_lines_by_looking_at_edge(line_im)
-
-    line_txt = split_line_into_rows(line_im.copy(), vertical_lines)
-    print(line_txt)
-
-    line_im = cv2.cvtColor(line_im, cv2.COLOR_GRAY2RGB)
-    for vl in vertical_lines:
-        x1, y1, x2, y2 = vl, 0, vl, line_im.shape[0]
-        cv2.line(line_im, (x1, y1), (x2, y2), (0, 0, 255), 3)
-    cv2.imwrite(OUT + 'line_ex_wut_lines.png', line_im)
-
-
-def main():
+def find_all_vertical_lines(line_im):
+    """ Find all vertical lines in an image of a single line of the table.
+    Expect 5 major lines and 12-14 minor lines.
     """
-    1. Find longest horizontal and vertical line
-    2. Find position of horizontal text lines
-    3. Dissect
-    4. OCR
-    5. Reassemble
-    """
-    path = '/home/edgar/OCR/Scuole_Primarie_1863_page12.png'
-    out = '/home/edgar/OCR/out/'
-    img = cv2.imread(path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-    # cv2.imwrite(out + 'edges.jpg', edges)
+    cutoff, small_cutoff = 30, 15
+    edge_width = int(line_im.shape[0] / 4.)
+    main_verticals = find_vertical_lines_by_looking_at_edge(line_im[:, cutoff:-cutoff].copy(), threshold=40,
+                                                            edge=edge_width, width=5)
+    main_verticals = combine_lines_within_threshold(main_verticals, merge_threshold=10)
 
-    # find_edges(gray)
-    # find_lines(gray)
-    # trim_to_table(gray)
-    # segment_image(gray)
-    helper_function_segment_line()
+    main_verticals = np.array(main_verticals)
+    main_verticals = main_verticals + cutoff
+
+    # No find the lines inbetween
+    minor_lines = []
+    previous_x = 0
+    parition_lines = list(main_verticals) + [line_im.shape[1]]
+    for ml in sorted(parition_lines):
+        if (ml - previous_x) > 2 * small_cutoff:
+            xs, xe = previous_x + small_cutoff, ml - 4
+            part_im = line_im[:, xs:xe].copy()
+
+            lines = find_vertical_lines_by_looking_at_edge(part_im, threshold=210, edge=edge_width, width=2)
+            minor_lines += [x + xs for x in lines]
+
+            previous_x = ml
+    minor_lines = combine_lines_within_threshold(minor_lines, merge_threshold=10)
+
+    return main_verticals, minor_lines
 
 
-if __name__ == '__main__':
-    start_time = time.time()
-    main()
-    print(" --- Ran in {:.3f} seconds --- ".format(time.time() - start_time))
+
+
