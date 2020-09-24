@@ -2,3 +2,5 @@ numpy
 matplotlib
 pdf2image
 pytesseract
+tesserocr
+pillow

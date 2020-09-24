@@ -9,6 +9,7 @@ import matplotlib.pylab as plt
 
 import functions as f
 import page_splitting as ps
+import miscellaneous as misc
 
 OUT = '/home/edgar/OCR/out/'
 
@@ -50,17 +51,19 @@ def main():
     # find_edges(gray)
     # find_lines(gray)
     # vertical_lines, horizontal_lines, txt_lines, table = ps.trim_to_table(gray)
-    # ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, OUT + 'table_with_lines.png')
+    # ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, OUT + 'table_with_lines11.png')
 
     # outf = OUT + 'lines/'
     # if not os.path.exists(outf): os.mkdir(outf)
 
-    text = ps.segment_image(gray)
+    # text = ps.segment_image(gray)
+    path = OUT + 'Scuole_Primarie_1863_page12.csv'
+    # with open(path, 'w') as f:
+    #     for line in text:
+    #         f.write('{}\n'.format(','.join(line)))
+    #         print(line)
 
-    with open(OUT + 'Scuole_Primarie_1863_page12.csv', 'w') as f:
-        for line in text:
-            f.write('{}\n'.format(','.join(line)))
-
+    misc.clean_csv(path)
     # helper_function_segment_line()
 
 

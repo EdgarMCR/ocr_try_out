@@ -155,7 +155,22 @@ def main():
     # for file in os.scandir(pdf):
     #     if file.name[-4:] == '.pdf' and 'page' in file.name:
     #         convert_pdf_to_image(file.path)
-    convert_pdf_to_image('/home/edgar/OCR/Scuole_Primarie_1863_page12.pdf')
+    # convert_pdf_to_image('/home/edgar/OCR/Scuole_Primarie_1863_page12.pdf')
+
+    import tesserocr
+    from tesserocr import PyTessBaseAPI, PSM
+    import cv2
+    from PIL import Image
+    # api = tesserocr.PyTessBaseAPI()
+
+    path = '/home/edgar/OCR/out/Line1_107-169.png'
+    img = cv2.imread(path)
+    images = ['/home/edgar/OCR/out/Line1_107-169.png', '/home/edgar/OCR/out/Line2_167-229.png']
+
+    with PyTessBaseAPI(psm=PSM.SINGLE_LINE) as api:
+        # for img in images:
+        api.SetImage(Image.fromarray(img))
+        print(api.GetUTF8Text())
 
 
 if __name__ == '__main__':

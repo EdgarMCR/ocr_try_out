@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import matplotlib.pylab as plt
 import pytesseract
+from tesserocr import PyTessBaseAPI, PSM
+from PIL import Image
 
 import functions as f
 
@@ -25,6 +27,43 @@ def find_local_minima_and_maximas_indexs(data):
     minima = (np.diff(np.sign(np.diff(data))) > 0).nonzero()[0] + 1  # local min
     maxima = (np.diff(np.sign(np.diff(data))) < 0).nonzero()[0] + 1  # local max
     return minima, maxima
+
+
+def combine_points_with_smallest_distance(points: List, merge_threshold):
+    points = list(points)
+    new_points = []
+    if len(points) > 1:
+        diff = np.diff(points)
+        index = np.argmin(diff)
+        if diff[index] < merge_threshold:
+            if index > 0:
+                new_points += points[:index]
+            new_points += [(points[index] + points[index + 1]) / 2.0]
+            if index < len(points) - 1:
+                new_points += points[index + 2:]
+        else:
+            new_points = points
+    else:
+        new_points = points
+    return new_points
+
+
+def combine_lines_within_threshold(lines: List[int], merge_threshold: int = 10):
+    """ Combine any lines that are within the threshold and replace them by their average, works recursively, starting
+    with the lines closest together.
+    """
+    new_lines = lines
+    if len(lines) > 0:
+        merging = True
+        while merging:
+            nl = combine_points_with_smallest_distance(new_lines, merge_threshold)
+            if len(nl) < len(new_lines):
+                new_lines = nl
+                merging = True
+            else:
+                merging = False
+
+    return [int(round(x)) for x in new_lines]
 
 
 def get_average_value(gray, axis, step=5, width=None):
@@ -113,10 +152,34 @@ def find_outer_boxing_lines_of_table(gray, save_path=None):
     return (top_line_y_pos, top_2nd_line_y_pos, bottom_line_y_pos), (left_x_pos, right_x_pos)
 
 
+def get_smooth_ave_value_and_minima(image, step=1, width=7, threshold=150):
+    pos, value = get_average_value(image, axis='y', step=step, width=width)
+    pos, value = pos[3:-3], running_mean(value, 7)
+
+    pos, value = np.array(pos), np.array(value)
+    minima, _ = find_local_minima_and_maximas_indexs(value)
+    # sel_minima_indexes = np.array([x for x in minima if value[x] < threshold])
+    minima_indexes = np.array([x for x in minima if 180 < value[x] < 240])
+    minima_indexes = np.array(combine_lines_within_threshold(minima_indexes, 6))
+    minimas_pos = pos[minima_indexes]
+    return pos, value, minima_indexes, minimas_pos
+
+
 def trim_to_table(gray):
     """ Trim image to the part that is the table. """
     ys, xs = find_outer_boxing_lines_of_table(gray)
     table = gray[ys[1]:ys[2], xs[0]:xs[1]]
+
+    # Check if we need to rotate the page
+    plt.figure(figsize=(10, 6))
+    pos, value, minima_indexes, minimas_pos_left = get_smooth_ave_value_and_minima(table[500:-500, :500].copy())
+    plt.plot(pos, value, '-r', lw=1)
+    plt.plot(pos[minima_indexes], value[minima_indexes], 'oc', ms=2)
+
+    pos, value, minima_indexes, minimas_pos_right = get_smooth_ave_value_and_minima(table[500:-500, -500:].copy())
+    plt.plot(pos, value, '-b', lw=1)
+    plt.plot(pos[minima_indexes], value[minima_indexes], 'sk', ms=2)
+
 
     threshold = 150
 
@@ -138,14 +201,17 @@ def trim_to_table(gray):
     pos_s, value_s = pos[3:-3], running_mean(value, 7)
     minima, _ = find_local_minima_and_maximas_indexs(value_s)
     text_lines = np.array([x for x in minima if 200 < value_s[x] < 240])
+    text_lines = combine_lines_within_threshold(text_lines, 6)
+
     txt_lines = pos[text_lines]
 
-    # plt.plot(pos, value, 's-b', ms=2, lw=1, label='y')
-    # plt.plot(pos_s, value_s, 'h:k', ms=2, lw=1, label='y')
-    # plt.plot(pos[sel_minima], value[sel_minima], 'dy', ms=3, lw=None, label='x')
-    # plt.plot(pos_s[text_lines], value_s[text_lines], 'dg', ms=3, lw=None, label='x')
-    # plt.title('y')
-    # # plt.savefig(OUT + 'y_table_lines.png', dpi=300)
+    plt.figure(figsize=(10,6))
+    plt.plot(pos, value, 's-b', ms=2, lw=1, label='y')
+    plt.plot(pos_s, value_s, 'h:k', ms=2, lw=1, label='y')
+    plt.plot(pos[sel_minima], value[sel_minima], 'dy', ms=3, lw=None, label='x')
+    plt.plot(pos_s[text_lines], value_s[text_lines], 'dg', ms=3, lw=None, label='x')
+    plt.title('y')
+    # plt.savefig(OUT + 'y_table_lines.png', dpi=300)
     # plt.show()
     return vertical_lines, horizontal_lines, txt_lines, table
 
@@ -267,7 +333,7 @@ def segment_image(gray):
     vertical_lines, horizontal_lines, txt_lines, table = trim_to_table(gray)
 
     # TODO: deal with cases where there are headings in the table
-
+    # api = PyTessBaseAPI(lang='ita', psm=PSM.SINGLE_WORD) #PSM.SINGLE_BLOCK)
     half_median_height = int(np.median(np.diff(txt_lines))/2)
     text = []
     start_time = time.time()
@@ -275,6 +341,7 @@ def segment_image(gray):
         if ii > 0:
             print("{} / {} after {} seconds ({} for the last line)".format(ii+1, len(txt_lines), time.time() - start_time, time.time() - last_time))
         last_time = time.time()
+
         line_text = []
         top, bottom = line_y - half_median_height, line_y + half_median_height
         line_im = table[top:bottom, :]
@@ -287,50 +354,15 @@ def segment_image(gray):
                 if (ml - previous_x) > 40:
                     xs, xe = previous_x + 10, ml - 4
                     part_im = line_im[:, xs:xe].copy()
+
+                    # api.SetImage(Image.fromarray(part_im))
+                    # string = api.GetUTF8Text()
                     string = pytesseract.image_to_string(part_im, lang='ita', config='--psm 7')
-                    match = re.search(r'[a-zA-Z]{4,25}|\d{1,5}|>>|"', string.replace(',', ''))
-                    if match:
-                        line_text.append(match.group())
+
+                    line_text.append(string.replace(',', '').replace('\n', '').replace('\f', ''))
                     previous_x = ml
         text.append(line_text)
     return text
-
-
-def combine_points_with_smallest_distance(points: List, merge_threshold):
-    points = list(points)
-    new_points = []
-    if len(points) > 1:
-        diff = np.diff(points)
-        index = np.argmin(diff)
-        if diff[index] < merge_threshold:
-            if index > 0:
-                new_points += points[:index]
-            new_points += [(points[index] + points[index + 1]) / 2.0]
-            if index < len(points) - 1:
-                new_points += points[index + 2:]
-        else:
-            new_points = points
-    else:
-        new_points = points
-    return new_points
-
-
-def combine_lines_within_threshold(lines: List[int], merge_threshold: int = 10):
-    """ Combine any lines that are within the threshold and replace them by their average, works recursively, starting
-    with the lines closest together.
-    """
-    new_lines = lines
-    if len(lines) > 0:
-        merging = True
-        while merging:
-            nl = combine_points_with_smallest_distance(new_lines, merge_threshold)
-            if len(nl) < len(new_lines):
-                new_lines = nl
-                merging = True
-            else:
-                merging = False
-
-    return [int(round(x)) for x in new_lines]
 
 
 def find_vertical_lines_by_looking_at_edge(line_im, threshold=210, edge=8, width=2, step=2):
