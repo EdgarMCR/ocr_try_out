@@ -9,6 +9,7 @@ import matplotlib.pylab as plt
 import pytesseract
 from tesserocr import PyTessBaseAPI, PSM
 from PIL import Image
+import imutils
 
 import functions as f
 
@@ -118,10 +119,12 @@ def find_horizontal_lines(gray):
 
 def find_vertical_lines(gray):
     """ Find main outer vertical lines """
-    pos, value = get_average_value(gray[:, 0:750], axis='x', step=5)
-    left_x_pos = pos[value.index(min(value))]
+    margin = int(gray.shape[1]/3)
+    left_offset = int(gray.shape[1]/20)
+    pos, value = get_average_value(gray[:, left_offset:margin], axis='x', step=5)
+    left_x_pos = pos[value.index(min(value))] + left_offset
 
-    start = gray.shape[1] - 750
+    start = gray.shape[1] - margin
     pos, value = get_average_value(gray[:, start:], axis='x', step=5)
     right_x_pos = pos[value.index(min(value))] + start
 
@@ -152,34 +155,52 @@ def find_outer_boxing_lines_of_table(gray, save_path=None):
     return (top_line_y_pos, top_2nd_line_y_pos, bottom_line_y_pos), (left_x_pos, right_x_pos)
 
 
-def get_smooth_ave_value_and_minima(image, step=1, width=7, threshold=150):
+def get_smooth_ave_value_and_minima(image, step=1, width=8, threshold=200):
     pos, value = get_average_value(image, axis='y', step=step, width=width)
     pos, value = pos[3:-3], running_mean(value, 7)
 
     pos, value = np.array(pos), np.array(value)
     minima, _ = find_local_minima_and_maximas_indexs(value)
-    # sel_minima_indexes = np.array([x for x in minima if value[x] < threshold])
-    minima_indexes = np.array([x for x in minima if 180 < value[x] < 240])
+    minima_indexes = np.array([x for x in minima if value[x] < threshold])
     minima_indexes = np.array(combine_lines_within_threshold(minima_indexes, 6))
     minimas_pos = pos[minima_indexes]
     return pos, value, minima_indexes, minimas_pos
+
+
+def rotate_image(gray):
+    # Check if we need to rotate the page
+    ys, xs = find_outer_boxing_lines_of_table(gray)
+
+    line = gray[ys[2] - 30:ys[2] + 50, :]
+    margin = 1000
+
+    pos, value, minima_indexes, minimas_pos_left = get_smooth_ave_value_and_minima(line[:, 0:margin].copy())
+    # plt.figure(figsize=(10, 6))
+    # plt.plot(pos, value, '-r', lw=1)
+    # plt.plot(pos[minima_indexes], value[minima_indexes], 'oc', ms=2)
+
+    pos, value, minima_indexes, minimas_pos_right = get_smooth_ave_value_and_minima(line[:, -1*margin:].copy())
+    # plt.plot(pos, value, '-b', lw=1)
+    # plt.plot(pos[minima_indexes], value[minima_indexes], 'sk', ms=2)
+    # plt.show()
+
+    if len(minimas_pos_left) == len(minimas_pos_right) == 1:
+        yl, yr = minimas_pos_left[0], minimas_pos_right[0]
+        distance = gray.shape[1] - margin
+        theta = np.arcsin((yl-yr)/distance)
+        print("theta = {} ({})".format(theta, theta * (180/np.pi)))
+        theta = theta * (180/np.pi)
+        if 2 > np.abs(theta) > 0.1:
+            print("Rotating")
+            gray = imutils.rotate_bound(gray, theta)
+
+    return gray
 
 
 def trim_to_table(gray):
     """ Trim image to the part that is the table. """
     ys, xs = find_outer_boxing_lines_of_table(gray)
     table = gray[ys[1]:ys[2], xs[0]:xs[1]]
-
-    # Check if we need to rotate the page
-    plt.figure(figsize=(10, 6))
-    pos, value, minima_indexes, minimas_pos_left = get_smooth_ave_value_and_minima(table[500:-500, :500].copy())
-    plt.plot(pos, value, '-r', lw=1)
-    plt.plot(pos[minima_indexes], value[minima_indexes], 'oc', ms=2)
-
-    pos, value, minima_indexes, minimas_pos_right = get_smooth_ave_value_and_minima(table[500:-500, -500:].copy())
-    plt.plot(pos, value, '-b', lw=1)
-    plt.plot(pos[minima_indexes], value[minima_indexes], 'sk', ms=2)
-
 
     threshold = 150
 
@@ -233,7 +254,7 @@ def plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, sa
     cv2.imwrite(save_path, table)
 
 
-def find_edges(gray):
+def find_edges(gray, OUT):
     top_index = 0
     step = 2
     pos, value = [], []
@@ -256,53 +277,6 @@ def find_edges(gray):
     plt.show()
 
 
-def segment_into_sub_lines(im, segment):
-    # find lines in input
-
-    if not segment:
-        threshold = 150
-        pos, value = get_average_value(im.copy(), axis='x', step=2, width=2)
-        pos, value = np.array(pos), np.array(value)
-        minima, _ = find_local_minima_and_maximas_indexs(value)
-        sel_minima = np.array([x for x in minima if value[x] < threshold])
-        vertical_lines = pos[sel_minima]
-
-        # plt.figure(figsize=(6,4))
-        # plt.plot(pos, value, 'o-r', ms=2, lw=1, label='x')
-        # plt.plot(pos[sel_minima], value[sel_minima], 'dy', ms=3, lw=None, label='x')
-        # plt.title('x')
-        # plt.show()
-
-        previous_x = None
-        texts = []
-        for x_line in vertical_lines:
-            if previous_x is None:
-                if x_line < 40:
-                    previous_x = 40
-                else:
-                    previous_x = x_line
-                continue
-            part = im[:, previous_x:x_line - 5]
-            part = add_border(part)
-            # cv2.imshow('min_part {}:{}'.format(previous_x, x_line), part)
-            # cv2.waitKey(2)
-            # plt.figure()
-            # plt.imshow(part, cmap='gray', vmin=0, vmax=255)
-            # plt.show()
-            text = f.get_ocr_as_text_output(part, info=True)
-            texts.append(text)
-            previous_x = x_line + 10
-
-        part = im[:, previous_x:-5]
-        text = f.get_ocr_as_text_output(part, info=True)
-        texts.append(text)
-
-        text = ' '.join(texts)
-    else:
-        text = f.get_ocr_as_text_output(im)
-    return text.replace('\n', '')
-
-
 def add_border(im, border=40):
     """ Add border around image """
     value = (255, 255, 255)
@@ -312,57 +286,86 @@ def add_border(im, border=40):
     return dst
 
 
-def split_line_into_rows(line_im, vertical_lines):
-    texts = []
-
-    for ii in range(1, len(vertical_lines)):
-        xs, xe = vertical_lines[ii - 1], vertical_lines[ii]
-        if xe - xs > 10:
-            part = line_im[:, xs + 5:xe - 5]
-            text = f.get_ocr_as_text_output(part, info=True)
-            if ii > 1:
-                match = re.search(r'[a-zA-Z]{4,25}|\d{1,5}|>>|"', text.replace(',', ''))
-                if match:
-                    texts.append(match.group())
-
-    return ', '.join(texts)
-
-
 def segment_image(gray):
     """ Find table and split it into individual lines. """
     vertical_lines, horizontal_lines, txt_lines, table = trim_to_table(gray)
 
     # TODO: deal with cases where there are headings in the table
     # api = PyTessBaseAPI(lang='ita', psm=PSM.SINGLE_WORD) #PSM.SINGLE_BLOCK)
-    half_median_height = int(np.median(np.diff(txt_lines))/2)
+
     text = []
+    main, _ = find_all_vertical_lines(table)
+    plot_table_with_lines(main, [], [], table, '/home/edgar/OCR/out/main_vertical_lines.png')
+    if len(main) != 5:
+        print('Could not find main 5 dividing vertical lines, returning nothing')
+        return text
+
+    half_median_height = int(np.median(np.diff(txt_lines))/2)
     start_time = time.time()
     for ii, line_y in enumerate(txt_lines):
         if ii > 0:
-            print("{} / {} after {} seconds ({} for the last line)".format(ii+1, len(txt_lines), time.time() - start_time, time.time() - last_time))
+            print("{} / {} after {} seconds ({} for the last line)".format(ii+1, len(txt_lines),
+                                                                           time.time() - start_time,
+                                                                           time.time() - last_time))
         last_time = time.time()
 
-        line_text = []
         top, bottom = line_y - half_median_height, line_y + half_median_height
         line_im = table[top:bottom, :]
-        main, minor = find_all_vertical_lines(line_im)
-        if len(main) == 5:
-            #Take each row in turn
-            previous_x = 0
-            parition_lines = list(main) + list(minor) + [line_im.shape[1]]
-            for ml in sorted(parition_lines):
-                if (ml - previous_x) > 40:
-                    xs, xe = previous_x + 10, ml - 4
-                    part_im = line_im[:, xs:xe].copy()
-
-                    # api.SetImage(Image.fromarray(part_im))
-                    # string = api.GetUTF8Text()
-                    string = pytesseract.image_to_string(part_im, lang='ita', config='--psm 7')
-
-                    line_text.append(string.replace(',', '').replace('\n', '').replace('\f', ''))
-                    previous_x = ml
+        line_text = ocr_table_line(line_im,main)
         text.append(line_text)
+
+        if ii > 2:
+            break
+
     return text
+
+
+def ocr_table_line(line_im, back_up_main):
+    columns = {0: 1, 1: 3, 2: 3, 3: 3, 4: 3, 5:5}
+    line_text = []
+    main, minor = find_all_vertical_lines(line_im)
+    if len(main) != 5:
+        print("Found {} main columns, not {}, falling back on backup".format(len(main), 5))
+        # Use backup mains
+        main = back_up_main
+    # Take each row in turn
+    previous_x = 0
+    parition_lines = list(main) + [line_im.shape[1]]
+    for ii, ml in enumerate(sorted(parition_lines)):
+        if (ml - previous_x) > 40:
+            xs, xe = previous_x + 10, ml - 4
+            part_im = line_im[:, xs:xe].copy()
+
+            _, minor = find_all_vertical_lines(part_im)
+            lines = list(minor) + [part_im.shape[1]]
+            texts = split_image_by_lines(part_im, lines)
+
+            if len(texts) != columns[ii]:
+                #Make sure we have the right number of columns
+                while len(texts) < columns[ii]:
+                    texts.append('')
+
+                texts = texts[:columns[ii]]
+            line_text += texts
+            previous_x = ml
+
+    return line_text
+
+
+def split_image_by_lines(image, lines):
+    px = 0
+    texts = []
+    for jj, mil in enumerate(sorted(lines)):
+        if (mil - px) > 40:
+            xis, xie = px + 3, mil - 1
+            cell_im = image[:, xis:xie].copy()
+
+            # api.SetImage(Image.fromarray(part_im))
+            # string = api.GetUTF8Text()
+            string = pytesseract.image_to_string(cell_im, lang='ita', config='--psm 7')
+            texts.append(string.replace(',', '').replace('\n', '').replace('\f', ''))
+            px = mil
+    return texts
 
 
 def find_vertical_lines_by_looking_at_edge(line_im, threshold=210, edge=8, width=2, step=2):
@@ -376,6 +379,10 @@ def find_vertical_lines_by_looking_at_edge(line_im, threshold=210, edge=8, width
     if len(sel_minima) > 0:
         vertical_lines = pos[sel_minima]
 
+    # plt.figure()
+    # plt.plot(pos, value, 'o-r', lw=2, ms=3)
+    # plt.plot(pos[sel_minima], value[sel_minima], 'db', ms=4)
+    # plt.show()
     return vertical_lines
 
 
@@ -387,12 +394,15 @@ def find_all_vertical_lines(line_im):
     edge_width = int(line_im.shape[0] / 4.)
     main_verticals = find_vertical_lines_by_looking_at_edge(line_im[:, cutoff:-cutoff].copy(), threshold=40,
                                                             edge=edge_width, width=5)
+    if len(main_verticals) < 5:
+        main_verticals = find_vertical_lines_by_looking_at_edge(line_im[:, cutoff:-cutoff].copy(), threshold=125,
+                                                                edge=edge_width, width=5)
     main_verticals = combine_lines_within_threshold(main_verticals, merge_threshold=10)
 
     main_verticals = np.array(main_verticals)
     main_verticals = main_verticals + cutoff
 
-    # No find the lines inbetween
+    # Now find the lines inbetween
     minor_lines = []
     previous_x = 0
     parition_lines = list(main_verticals) + [line_im.shape[1]]

@@ -62,7 +62,6 @@ def convert_words_to_list(words) -> tuple:
 
 
 def convert_pdf_to_image(pdf: str, dpi=300) -> List[str]:
-    pass
     paths = []
     pages = convert_from_path(pdf, dpi=dpi)
     if len(pages) == 1:
@@ -155,7 +154,7 @@ def main():
     # for file in os.scandir(pdf):
     #     if file.name[-4:] == '.pdf' and 'page' in file.name:
     #         convert_pdf_to_image(file.path)
-    # convert_pdf_to_image('/home/edgar/OCR/Scuole_Primarie_1863_page12.pdf')
+    convert_pdf_to_image('/home/edgar/OCR/Scuole_Primarie_1863_page12.pdf')
 
     import tesserocr
     from tesserocr import PyTessBaseAPI, PSM

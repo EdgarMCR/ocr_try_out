@@ -1,7 +1,11 @@
 import re
 import os
 import time
+import traceback
+import datetime
+import logging
 from typing import List
+from multiprocessing import Pool
 
 import cv2
 import numpy as np
@@ -12,25 +16,46 @@ import page_splitting as ps
 import miscellaneous as misc
 
 OUT = '/home/edgar/OCR/out/'
+HEADER = ["Circondaria e Comuni", "Scuole Totale", "Scuole Maschili", "Scuole Feminili", "Alunni Totale",
+          "Alunni Maschili", "Alunni Feminili", "Inseganti Totale", "Inseganti Maschili", "Inseganti Feminili",
+          "Proventi Totale", "Proventi dai Governo", "Proventi dalla Provinc", "Proventi dal Comune",
+          "Proventi diversi"]
 
 
-def helper_function_segment_line():
-    f = '/home/edgar/PycharmProjects/OCR/src/test/line_test_data/line_titel_ex_1.png'
-    line_im = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-    # vertical_lines = find_vertical_lines_by_looking_at_edge(line_im)
-    vertical_lines, minor_lines = ps.find_all_vertical_lines(line_im)
-    # line_txt = split_line_into_rows(line_im.copy(), vertical_lines)
-    # print(line_txt)
+def ocr_pdf_page(path_pdf):
+    paths = misc.convert_pdf_to_image(path_pdf, dpi=300)
 
-    line_im = cv2.cvtColor(line_im, cv2.COLOR_GRAY2RGB)
-    for vl in vertical_lines:
-        x1, y1, x2, y2 = vl, 0, vl, line_im.shape[0]
-        cv2.line(line_im, (x1, y1), (x2, y2), (0, 0, 255), 3)
+    for path in paths:
+        save_path = path.replace('.png', '.csv')
+        # if not os.path.exists(save_path):
+        img = cv2.imread(path)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    for vl in minor_lines:
-        x1, y1, x2, y2 = vl, 0, vl, line_im.shape[0]
-        cv2.line(line_im, (x1, y1), (x2, y2), (255, 0, 0), 3)
-    cv2.imwrite(OUT + 'line_title_ex_wut_lines.png', line_im)
+        gray = ps.rotate_image(gray)
+
+        print('Starting processing image ...')
+        text = ps.segment_image(gray)
+
+        save_path = path.replace('.png', '.csv')
+        with open(save_path, 'w') as f:
+            f.write('{}\n'.format(','.join(HEADER)))
+            for line in text:
+                f.write('{}\n'.format(','.join(line)))
+        misc.clean_csv(save_path)
+        # else:
+        #     print("{} already exists, terminating".format(save_path))
+
+
+def ocr_pdf_in_folder(folder):
+    results = []
+    for file in os.scandir(folder):
+        if '.pdf' in file.name:
+            print("Doing {} at {}".format(file.name, str(datetime.datetime.now())))
+            match = re.search(r'page(\d{1,3}).pdf', file.name)
+            if match and int(match.group(1)) % 2 != 0:
+                print('skipping odd pages')
+                continue
+            ocr_pdf_page(file.path)
 
 
 def main():
@@ -41,29 +66,34 @@ def main():
     4. OCR
     5. Reassemble
     """
-    path = '/home/edgar/OCR/Scuole_Primarie_1863_page12.png'
+    path = '/home/edgar/OCR/Scuole_Primarie_1863_page17.pdf'
     out = '/home/edgar/OCR/out/'
-    img = cv2.imread(path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ocr_pdf_in_folder(folder='/home/edgar/OCR/')
+    # ocr_pdf_page(path)
+
+    # img = cv2.imread(path)
+    # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     # cv2.imwrite(out + 'edges.jpg', edges)
 
     # find_edges(gray)
     # find_lines(gray)
+    # gray = ps.rotate_image(gray)
+    # ps.find_outer_boxing_lines_of_table(gray, out+'boxing_lines.png')
     # vertical_lines, horizontal_lines, txt_lines, table = ps.trim_to_table(gray)
-    # ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, OUT + 'table_with_lines11.png')
+    # ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, OUT + 'table_with_lines17_wo.png')
+    #
 
     # outf = OUT + 'lines/'
     # if not os.path.exists(outf): os.mkdir(outf)
 
     # text = ps.segment_image(gray)
-    path = OUT + 'Scuole_Primarie_1863_page12.csv'
+    # path = OUT + 'Scuole_Primarie_1863_page11.csv'
     # with open(path, 'w') as f:
     #     for line in text:
     #         f.write('{}\n'.format(','.join(line)))
     #         print(line)
-
-    misc.clean_csv(path)
+    # misc.clean_csv(path)
     # helper_function_segment_line()
 
 
