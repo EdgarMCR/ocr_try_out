@@ -103,14 +103,15 @@ def get_average_value(gray, axis, step=5, width=None):
 
 def find_horizontal_lines(gray):
     """ Find main outer horizontal lines """
-    pos, value = get_average_value(gray[:750, :], axis='y', step=5)
+    margin = int(gray.shape[0]/5)
+    pos, value = get_average_value(gray[:margin, :], axis='y', step=5)
     top_line_y_pos = pos[value.index(min(value))]
 
-    new_start = top_line_y_pos + 100
-    pos, value = get_average_value(gray[new_start:750, :], axis='y', step=5)
+    new_start = top_line_y_pos + int(margin/4)
+    pos, value = get_average_value(gray[new_start:margin, :], axis='y', step=5)
     top_2nd_line_y_pos = pos[value.index(min(value))] + new_start
 
-    start = gray.shape[0] - 750
+    start = gray.shape[0] - margin
     pos, value = get_average_value(gray[start:, :], axis='y', step=5)
     bottom_line_y_pos = pos[value.index(min(value))] + start
 
@@ -119,8 +120,8 @@ def find_horizontal_lines(gray):
 
 def find_vertical_lines(gray):
     """ Find main outer vertical lines """
-    margin = int(gray.shape[1]/3)
-    left_offset = int(gray.shape[1]/20)
+    margin = int(gray.shape[1] / 3)
+    left_offset = int(gray.shape[1] / 20)
     pos, value = get_average_value(gray[:, left_offset:margin], axis='x', step=5)
     left_x_pos = pos[value.index(min(value))] + left_offset
 
@@ -167,7 +168,7 @@ def get_smooth_ave_value_and_minima(image, step=1, width=8, threshold=200):
     return pos, value, minima_indexes, minimas_pos
 
 
-def rotate_image(gray):
+def rotate_image(gray, cuttoff=30):
     # Check if we need to rotate the page
     ys, xs = find_outer_boxing_lines_of_table(gray)
 
@@ -179,7 +180,7 @@ def rotate_image(gray):
     # plt.plot(pos, value, '-r', lw=1)
     # plt.plot(pos[minima_indexes], value[minima_indexes], 'oc', ms=2)
 
-    pos, value, minima_indexes, minimas_pos_right = get_smooth_ave_value_and_minima(line[:, -1*margin:].copy())
+    pos, value, minima_indexes, minimas_pos_right = get_smooth_ave_value_and_minima(line[:, -1 * margin:].copy())
     # plt.plot(pos, value, '-b', lw=1)
     # plt.plot(pos[minima_indexes], value[minima_indexes], 'sk', ms=2)
     # plt.show()
@@ -187,54 +188,51 @@ def rotate_image(gray):
     if len(minimas_pos_left) == len(minimas_pos_right) == 1:
         yl, yr = minimas_pos_left[0], minimas_pos_right[0]
         distance = gray.shape[1] - margin
-        theta = np.arcsin((yl-yr)/distance)
-        print("theta = {} ({})".format(theta, theta * (180/np.pi)))
-        theta = theta * (180/np.pi)
+        theta = np.arcsin((yl - yr) / distance)
+        print("theta = {} ({})".format(theta, theta * (180 / np.pi)))
+        theta = theta * (180 / np.pi)
         if 2 > np.abs(theta) > 0.1:
             print("Rotating")
             gray = imutils.rotate_bound(gray, theta)
+            gray = gray[cuttoff:-cuttoff, cuttoff:-cuttoff]
 
     return gray
 
 
-def trim_to_table(gray):
+def find_minimas(im, axis='x', min=0, max=150, step=2, width=5, merge_threshold=5, mean=None):
+    pos, value = get_average_value(im, axis=axis, step=step, width=width)
+
+    pos, value = np.array(pos), np.array(value)
+
+    if mean is not None:
+        assert mean % 2 == 1
+        st = int((mean - 1) / 2)
+        pos, value = pos[st:-st], running_mean(value, mean)
+
+    minima, _ = find_local_minima_and_maximas_indexs(value)
+    sel_minima = np.array([x for x in minima if min < value[x] < max])
+    lines = pos[sel_minima]
+    lines = combine_lines_within_threshold(lines, merge_threshold)
+    return lines
+
+
+def trim_to_table(gray, threshold=150):
     """ Trim image to the part that is the table. """
     ys, xs = find_outer_boxing_lines_of_table(gray)
     table = gray[ys[1]:ys[2], xs[0]:xs[1]]
 
-    threshold = 150
+    for vt in [threshold, threshold+10, threshold+20, threshold+30, threshold+40, threshold+50, threshold+60]:
+        try:
+            vertical_lines = find_minimas(table.copy(), axis='x', max=vt, step=2, width=6, merge_threshold=12)
+        except IndexError:
+            vertical_lines = []
+        if len(vertical_lines) > 4:
+            break
+    vertical_lines = np.array(vertical_lines) + 2  # Center them on the line
+    horizontal_lines = find_minimas(table.copy(), axis='y', max=threshold, step=2, width=5, merge_threshold=5)
+    text_lines = find_minimas(table.copy(), axis='y', min=200, max=240, step=2, width=5, merge_threshold=6, mean=7)
 
-    pos, value = get_average_value(table.copy(), axis='x', step=2, width=5)
-
-    pos, value = np.array(pos), np.array(value)
-    minima, _ = find_local_minima_and_maximas_indexs(value)
-    sel_minima = np.array([x for x in minima if value[x] < threshold])
-    vertical_lines = pos[sel_minima]
-
-    pos, value = get_average_value(table.copy(), axis='y', step=2, width=5)
-
-    pos, value = np.array(pos), np.array(value)
-    minima, _ = find_local_minima_and_maximas_indexs(value)
-    sel_minima = np.array([x for x in minima if value[x] < threshold])
-
-    horizontal_lines = pos[sel_minima]
-
-    pos_s, value_s = pos[3:-3], running_mean(value, 7)
-    minima, _ = find_local_minima_and_maximas_indexs(value_s)
-    text_lines = np.array([x for x in minima if 200 < value_s[x] < 240])
-    text_lines = combine_lines_within_threshold(text_lines, 6)
-
-    txt_lines = pos[text_lines]
-
-    plt.figure(figsize=(10,6))
-    plt.plot(pos, value, 's-b', ms=2, lw=1, label='y')
-    plt.plot(pos_s, value_s, 'h:k', ms=2, lw=1, label='y')
-    plt.plot(pos[sel_minima], value[sel_minima], 'dy', ms=3, lw=None, label='x')
-    plt.plot(pos_s[text_lines], value_s[text_lines], 'dg', ms=3, lw=None, label='x')
-    plt.title('y')
-    # plt.savefig(OUT + 'y_table_lines.png', dpi=300)
-    # plt.show()
-    return vertical_lines, horizontal_lines, txt_lines, table
+    return vertical_lines, horizontal_lines, text_lines, table
 
 
 def plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, save_path):
@@ -294,36 +292,38 @@ def segment_image(gray):
     # api = PyTessBaseAPI(lang='ita', psm=PSM.SINGLE_WORD) #PSM.SINGLE_BLOCK)
 
     text = []
-    main, _ = find_all_vertical_lines(table)
-    plot_table_with_lines(main, [], [], table, '/home/edgar/OCR/out/main_vertical_lines.png')
-    if len(main) != 5:
+    plot_table_with_lines(vertical_lines, [], [], table, '/home/edgar/OCR/out2/main_vertical_lines.png')
+    if len(vertical_lines) != 5:
         print('Could not find main 5 dividing vertical lines, returning nothing')
         return text
 
-    half_median_height = int(np.median(np.diff(txt_lines))/2)
+    half_median_height = int(np.median(np.diff(txt_lines)) / 2)
     start_time = time.time()
     for ii, line_y in enumerate(txt_lines):
         if ii > 0:
-            print("{} / {} after {} seconds ({} for the last line)".format(ii+1, len(txt_lines),
+            print("{} / {} after {} seconds ({} for the last line)".format(ii + 1, len(txt_lines),
                                                                            time.time() - start_time,
                                                                            time.time() - last_time))
         last_time = time.time()
 
         top, bottom = line_y - half_median_height, line_y + half_median_height
         line_im = table[top:bottom, :]
-        line_text = ocr_table_line(line_im,main)
+        plot_table_with_lines(vertical_lines, [], [], line_im, '/home/edgar/OCR/out2/line_{}-{}.png'.format(top, bottom))
+        line_text = ocr_table_line(line_im, vertical_lines)
         text.append(line_text)
-
-        if ii > 2:
-            break
-
     return text
 
 
 def ocr_table_line(line_im, back_up_main):
-    columns = {0: 1, 1: 3, 2: 3, 3: 3, 4: 3, 5:5}
+    columns = {0: 1, 1: 3, 2: 3, 3: 3, 4: 3, 5: 5}
     line_text = []
-    main, minor = find_all_vertical_lines(line_im)
+    for vt in [20, 30, 40, 50, 80]:
+        try:
+            main = find_vertical_lines_in_line(line_im, threshold=vt, width=5, merge_threshold=14, cutoff=30)
+        except Exception:
+            main = []
+        if len(main) > 4:
+            break
     if len(main) != 5:
         print("Found {} main columns, not {}, falling back on backup".format(len(main), 5))
         # Use backup mains
@@ -336,16 +336,29 @@ def ocr_table_line(line_im, back_up_main):
             xs, xe = previous_x + 10, ml - 4
             part_im = line_im[:, xs:xe].copy()
 
-            _, minor = find_all_vertical_lines(part_im)
+            if ii != 0:
+                for vt in [180, 200, 210, 220]:
+                    minor = find_vertical_lines_in_line(part_im, threshold=vt, width=2, merge_threshold=10, cutoff=2)
+
+                    if len(minor) > columns[ii] - 1:
+                        break
+            else:
+                minor = []
+
             lines = list(minor) + [part_im.shape[1]]
             texts = split_image_by_lines(part_im, lines)
 
+            # Make sure we have the right number of columns
             if len(texts) != columns[ii]:
-                #Make sure we have the right number of columns
+                if len(texts) < columns[ii] and len(texts[0].split('|')) == columns[ii]:
+                    texts = texts[0].split('|')
+
                 while len(texts) < columns[ii]:
                     texts.append('')
 
                 texts = texts[:columns[ii]]
+            if len(texts) != columns[ii]:
+                print("len(texts), columns[{}] = {}, {} ".format(ii, len(texts), columns[ii]))
             line_text += texts
             previous_x = ml
 
@@ -386,6 +399,17 @@ def find_vertical_lines_by_looking_at_edge(line_im, threshold=210, edge=8, width
     return vertical_lines
 
 
+def find_vertical_lines_in_line(line_im, threshold=40, width=5, merge_threshold=10, cutoff=30):
+    edge_width = int(line_im.shape[0] / 4.)
+    verticals = find_vertical_lines_by_looking_at_edge(line_im[:, cutoff:-cutoff].copy(), threshold=threshold,
+                                                       edge=edge_width, width=width)
+    verticals = combine_lines_within_threshold(verticals, merge_threshold=merge_threshold)
+
+    verticals = np.array(verticals)
+    verticals = verticals + cutoff
+    return verticals
+
+
 def find_all_vertical_lines(line_im):
     """ Find all vertical lines in an image of a single line of the table.
     Expect 5 major lines and 12-14 minor lines.
@@ -418,7 +442,3 @@ def find_all_vertical_lines(line_im):
     minor_lines = combine_lines_within_threshold(minor_lines, merge_threshold=10)
 
     return main_verticals, minor_lines
-
-
-
-

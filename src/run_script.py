@@ -22,40 +22,45 @@ HEADER = ["Circondaria e Comuni", "Scuole Totale", "Scuole Maschili", "Scuole Fe
           "Proventi diversi"]
 
 
-def ocr_pdf_page(path_pdf):
+def ocr_pdf_page(path_pdf, save_folder):
     paths = misc.convert_pdf_to_image(path_pdf, dpi=300)
 
     for path in paths:
-        save_path = path.replace('.png', '.csv')
-        # if not os.path.exists(save_path):
-        img = cv2.imread(path)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        save_path = os.path.join(save_folder, os.path.basename(path.replace('.png', '.csv')))
+        print("save_path = {}".format(save_path))
+        if not os.path.exists(save_path):
+            img = cv2.imread(path)
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        gray = ps.rotate_image(gray)
+            gray = ps.rotate_image(gray)
 
-        print('Starting processing image ...')
-        text = ps.segment_image(gray)
+            print('Starting processing image ...')
+            text = ps.segment_image(gray)
 
-        save_path = path.replace('.png', '.csv')
-        with open(save_path, 'w') as f:
-            f.write('{}\n'.format(','.join(HEADER)))
-            for line in text:
-                f.write('{}\n'.format(','.join(line)))
-        misc.clean_csv(save_path)
-        # else:
-        #     print("{} already exists, terminating".format(save_path))
+            with open(save_path, 'w') as f:
+                f.write('{}\n'.format(','.join(HEADER)))
+                for line in text:
+                    f.write('{}\n'.format(','.join(line)))
+            misc.clean_csv(save_path)
+        else:
+            print("{} already exists, returning".format(save_path))
 
 
-def ocr_pdf_in_folder(folder):
+def ocr_pdf_in_folder(folder, save_folder):
     results = []
     for file in os.scandir(folder):
         if '.pdf' in file.name:
             print("Doing {} at {}".format(file.name, str(datetime.datetime.now())))
             match = re.search(r'page(\d{1,3}).pdf', file.name)
-            if match and int(match.group(1)) % 2 != 0:
-                print('skipping odd pages')
-                continue
-            ocr_pdf_page(file.path)
+            if match:
+                # if int(match.group(1)) % 2 != 0:
+                #     print('skipping odd pages')
+                #     continue
+
+                try:
+                    ocr_pdf_page(file.path, save_folder)
+                except Exception as e:
+                    print("{} didn't work:{}".format(file.name, repr(e)))
 
 
 def main():
@@ -66,9 +71,9 @@ def main():
     4. OCR
     5. Reassemble
     """
-    path = '/home/edgar/OCR/Scuole_Primarie_1863_page17.pdf'
-    out = '/home/edgar/OCR/out/'
-    ocr_pdf_in_folder(folder='/home/edgar/OCR/')
+    path = '/home/edgar/OCR/Scuole_Primarie_1863_page110.png'
+    out = '/home/edgar/OCR/out2/'
+    ocr_pdf_in_folder(folder='/home/edgar/OCR/', save_folder='/home/edgar/OCR/output')
     # ocr_pdf_page(path)
 
     # img = cv2.imread(path)
@@ -80,15 +85,15 @@ def main():
     # find_lines(gray)
     # gray = ps.rotate_image(gray)
     # ps.find_outer_boxing_lines_of_table(gray, out+'boxing_lines.png')
-    # vertical_lines, horizontal_lines, txt_lines, table = ps.trim_to_table(gray)
-    # ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, OUT + 'table_with_lines17_wo.png')
+    # vertical_lines, horizontal_lines, txt_lines, table = ps.trim_to_table(gray, threshold=150)
+    # ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, out + 'table_with_lines110_wo.png')
     #
 
     # outf = OUT + 'lines/'
     # if not os.path.exists(outf): os.mkdir(outf)
 
     # text = ps.segment_image(gray)
-    # path = OUT + 'Scuole_Primarie_1863_page11.csv'
+    # path = out + 'Scuole_Primarie_1863_page110.csv'
     # with open(path, 'w') as f:
     #     for line in text:
     #         f.write('{}\n'.format(','.join(line)))
