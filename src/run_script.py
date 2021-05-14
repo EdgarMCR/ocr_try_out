@@ -71,22 +71,22 @@ def main():
     4. OCR
     5. Reassemble
     """
-    path = '/home/edgar/OCR/Scuole_Primarie_1863_page110.png'
+    path = '/home/edgar/OCR/Scuole_Primarie_1863_page14.png'
     out = '/home/edgar/OCR/out2/'
-    ocr_pdf_in_folder(folder='/home/edgar/OCR/', save_folder='/home/edgar/OCR/output')
+    # ocr_pdf_in_folder(folder='/home/edgar/OCR/', save_folder='/home/edgar/OCR/output')
     # ocr_pdf_page(path)
 
-    # img = cv2.imread(path)
-    # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = cv2.imread(path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     # cv2.imwrite(out + 'edges.jpg', edges)
 
     # find_edges(gray)
     # find_lines(gray)
-    # gray = ps.rotate_image(gray)
-    # ps.find_outer_boxing_lines_of_table(gray, out+'boxing_lines.png')
-    # vertical_lines, horizontal_lines, txt_lines, table = ps.trim_to_table(gray, threshold=150)
-    # ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, out + 'table_with_lines110_wo.png')
+    gray = ps.rotate_image(gray)
+    ps.find_outer_boxing_lines_of_table(gray, out+'boxing_lines.png')
+    vertical_lines, horizontal_lines, txt_lines, table = ps.trim_to_table(gray, threshold=150)
+    ps.plot_table_with_lines(vertical_lines, horizontal_lines, txt_lines, table, out + 'table_with_lines14_wo.png')
     #
 
     # outf = OUT + 'lines/'
